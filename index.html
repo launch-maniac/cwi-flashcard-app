@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AWS D15.1 CWI Part C Flashcard Drill</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+        .card-container {
+            perspective: 1000px;
+        }
+        .card {
+            position: relative;
+            width: 100%;
+            height: 100%;
+            transition: transform 0.6s;
+            transform-style: preserve-3d;
+        }
+        .card.is-flipped {
+            transform: rotateY(180deg);
+        }
+        .card-face {
+            position: absolute;
+            width: 100%;
+            height: 100%;
+            backface-visibility: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+            padding: 2rem;
+            border-radius: 0.75rem;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+        }
+        .card-front {
+            background-color: white;
+        }
+        .card-back {
+            background-color: #F3F4F6;
+            transform: rotateY(180deg);
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body class="bg-gray-100 flex items-center justify-center min-h-screen p-4">
+
+    <div class="w-full max-w-2xl mx-auto">
+        <div id="topic-section">
+            <h1 class="text-3xl font-bold text-center text-gray-800 mb-2">AWS D15.1 CWI Part C Flashcard Drill</h1>
+            <p class="text-center text-gray-500 mb-6">Practice locating information in the codebook. I'll ask a question, and you say the clause number.</p>
+            <div class="bg-white p-6 rounded-lg shadow-md mb-6 text-center">
+                <button id="generate-btn" class="w-full sm:w-auto bg-blue-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-blue-700 transition-colors focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 text-lg">
+                    Start Drill
+                </button>
+            </div>
+            <p id="error-message" class="text-center text-red-500 font-semibold mt-4"></p>
+        </div>
+
+        <div id="app-section" class="hidden">
+            <div id="card-container" class="card-container w-full h-64 mb-6">
+                <div id="card" class="card">
+                    <div class="card-face card-front">
+                        <h2 class="text-lg font-semibold text-gray-500 mb-2">Question</h2>
+                        <p id="question-text" class="text-2xl text-center font-medium text-gray-800"></p>
+                    </div>
+                    <div class="card-face card-back">
+                        <h2 class="text-lg font-semibold text-gray-500 mb-2">Answer</h2>
+                        <p id="answer-text" class="text-2xl text-center font-medium text-gray-800"></p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="status-display" class="text-center text-gray-600 font-medium h-8 mb-4 flex items-center justify-center">
+                 <div id="loader" class="loader hidden"></div>
+                 <span id="status-text"></span>
+            </div>
+
+            <div class="flex justify-center gap-4">
+                <button id="flip-btn" class="bg-gray-200 text-gray-800 font-semibold px-6 py-3 rounded-lg hover:bg-gray-300 transition-colors">Flip Card</button>
+                <button id="next-btn" class="bg-green-600 text-white font-semibold px-6 py-3 rounded-lg hover:bg-green-700 transition-colors">Next Card</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM Elements
+        const topicSection = document.getElementById('topic-section');
+        const appSection = document.getElementById('app-section');
+        const generateBtn = document.getElementById('generate-btn');
+        const card = document.getElementById('card');
+        const questionText = document.getElementById('question-text');
+        const answerText = document.getElementById('answer-text');
+        const statusDisplay = document.getElementById('status-display');
+        const statusText = document.getElementById('status-text');
+        const loader = document.getElementById('loader');
+        const flipBtn = document.getElementById('flip-btn');
+        const nextBtn = document.getElementById('next-btn');
+        const errorMessage = document.getElementById('error-message');
+
+        // App State
+        let flashcards = [];
+        let currentCardIndex = 0;
+        let isFlipped = false;
+        let isSpeaking = false;
+
+        // Speech Synthesis and Recognition
+        const synth = window.speechSynthesis;
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        let recognition;
+
+        if (SpeechRecognition) {
+            recognition = new SpeechRecognition();
+            recognition.continuous = false;
+            recognition.lang = 'en-US';
+            recognition.interimResults = false;
+        } else {
+            console.error("Speech Recognition not supported.");
+            errorMessage.textContent = "Voice features not supported in this browser.";
+        }
+
+        function speak(text, onEndCallback) {
+            if (synth.speaking) {
+                synth.cancel(); 
+            }
+            const utterance = new SpeechSynthesisUtterance(text);
+            utterance.onstart = () => isSpeaking = true;
+            utterance.onend = () => {
+                isSpeaking = false;
+                if (onEndCallback) onEndCallback();
+            };
+            utterance.onerror = (e) => {
+                console.error('Speech synthesis error', e);
+                isSpeaking = false;
+            };
+            synth.speak(utterance);
+        }
+
+        function listen() {
+            if (!recognition || isSpeaking) return;
+            statusText.textContent = "Listening for the clause number...";
+            try {
+                recognition.start();
+            } catch (e) {
+                console.error("Recognition start error:", e);
+                statusText.textContent = "Couldn't start listening.";
+            }
+        }
+
+        function handleRecognitionResult(event) {
+            const userAnswer = event.results[0][0].transcript.toLowerCase().trim();
+            const correctAnswer = flashcards[currentCardIndex].answer.toLowerCase().trim();
+            const correctClauseNumber = correctAnswer.match(/\d+/);
+
+            if (correctClauseNumber && userAnswer.includes(correctClauseNumber[0])) {
+                statusText.textContent = `Correct! It's ${correctAnswer}.`;
+                speak("Correct!", () => setTimeout(showNextCard, 1500));
+            } else {
+                statusText.textContent = `You said: "${userAnswer}". The correct answer is...`;
+                speak(`You said "${userAnswer}". The correct answer is...`, () => flipCard());
+            }
+        }
+
+        async function generateFlashcards() {
+            loader.classList.remove('hidden');
+            statusText.textContent = `Generating AWS D15.1 flashcards...`;
+            errorMessage.textContent = "";
+            generateBtn.disabled = true;
+            generateBtn.classList.add('opacity-50', 'cursor-not-allowed');
+
+            const apiUrl = "/.netlify/functions/get-flashcards";
+
+            try {
+                const response = await fetch(apiUrl);
+
+                // This is the updated, more robust error handling block
+                if (!response.ok) {
+                    const contentType = response.headers.get("content-type");
+                    if (contentType && contentType.indexOf("application/json") !== -1) {
+                        const errorData = await response.json();
+                        throw new Error(errorData.error || `Request failed with status ${response.status}`);
+                    } else {
+                        throw new Error(`Function not found or server error (Status: ${response.status}). Please ensure the functions folder was uploaded correctly to Netlify.`);
+                    }
+                }
+
+                const data = await response.json();
+                flashcards = data;
+                
+                if(flashcards.length > 0) {
+                    topicSection.classList.add('hidden');
+                    appSection.classList.remove('hidden');
+                    currentCardIndex = 0;
+                    displayCard();
+                } else {
+                     throw new Error("Generated content is empty.");
+                }
+
+            } catch (error) {
+                console.error("Error generating flashcards:", error);
+                errorMessage.textContent = `Error: ${error.message}`;
+            } finally {
+                loader.classList.add('hidden');
+                statusText.textContent = "";
+                generateBtn.disabled = false;
+                generateBtn.classList.remove('opacity-50', 'cursor-not-allowed');
+            }
+        }
+
+        function displayCard() {
+            if (currentCardIndex >= flashcards.length) {
+                statusText.textContent = "Great job! You've completed the deck.";
+                speak("Deck complete! Click 'Start Drill' to practice again.", () => {
+                    appSection.classList.add('hidden');
+                    topicSection.classList.remove('hidden');
+                });
+                return;
+            }
+
+            if (isFlipped) {
+                card.classList.remove('is-flipped');
+                isFlipped = false;
+            }
+            
+            const q = flashcards[currentCardIndex].question;
+            const a = flashcards[currentCardIndex].answer;
+
+            setTimeout(() => {
+                questionText.textContent = q;
+                answerText.textContent = a;
+                statusText.textContent = "";
+                speak(q, listen);
+            }, 300);
+        }
+        
+        function flipCard() {
+            if (isSpeaking) return;
+            isFlipped = !isFlipped;
+            card.classList.toggle('is-flipped', isFlipped);
+            if (isFlipped) {
+                speak(flashcards[currentCardIndex].answer);
+            }
+        }
+
+        function showNextCard() {
+            currentCardIndex++;
+            displayCard();
+        }
+
+        // Event Listeners
+        generateBtn.addEventListener('click', generateFlashcards);
+        flipBtn.addEventListener('click', flipCard);
+        nextBtn.addEventListener('click', showNextCard);
+        
+        if (recognition) {
+            recognition.addEventListener('result', handleRecognitionResult);
+            recognition.addEventListener('error', (event) => {
+                console.error('Speech recognition error', event.error);
+                if (event.error !== 'no-speech') {
+                   statusText.textContent = "Sorry, I didn't catch that.";
+                }
+            });
+            recognition.addEventListener('end', () => {
+                if (statusText.textContent === "Listening for the clause number...") {
+                    statusText.textContent = "";
+                }
+            });
+        }
+    </script>
+</body>
+</html>
